@@ -1,7 +1,14 @@
 # envoy-sample
 
-## Run
+envoy sample in golang
+
+## Quick Start
 
 ```bash
-docker run --rm -d -p 10000:10000 -v `pwa`/envoy.yaml:/etc/envoy/envoy.yaml envoyproxy/envoy-dev:6a6e43a94201e9059de61fd6e94fda984615b54c
+git clone https://github.com/purini-to/envoy-sample.git
+cd envoy-sample
+make compose
 ```
+
+service access to http://localhost and http://localhost/private  
+jaeger access to http://localhost:16686

@@ -1,0 +1,122 @@
+admin:
+  access_log_path: "/dev/null"
+  address:
+    socket_address:
+      address: 0.0.0.0
+      port_value: 8001
+
+static_resources:
+  listeners:
+  - name: listener
+    address:
+      socket_address:
+        protocol: TCP
+        address: 0.0.0.0
+        port_value: 80
+    filter_chains:
+    - filters:
+      - name: envoy.http_connection_manager
+        typed_config:
+          "@type": type.googleapis.com/envoy.config.filter.network.http_connection_manager.v2.HttpConnectionManager
+          tracing:
+            operation_name: ingress
+          codec_type: auto
+          stat_prefix: ingress_http
+          route_config:
+            name: local_route
+            virtual_hosts:
+            - name: local_service
+              domains: ["*"]
+              routes:
+              - match:
+                  prefix: "/"
+                route:
+                  cluster: service
+                decorator:
+                  operation: callEcho
+          access_log:
+          - name: envoy.file_access_log
+            typed_config:
+              "@type": type.googleapis.com/envoy.config.accesslog.v2.FileAccessLog
+              path: "/dev/stdout"
+          http_filters:
+          - name: envoy.router
+  - address:
+      socket_address:
+        address: 0.0.0.0
+        port_value: 9000
+    filter_chains:
+    - filters:
+      - name: envoy.http_connection_manager
+        typed_config:
+          "@type": type.googleapis.com/envoy.config.filter.network.http_connection_manager.v2.HttpConnectionManager
+          tracing:
+            operation_name: egress
+          codec_type: auto
+          stat_prefix: egress_http
+          route_config:
+            name: private_route
+            virtual_hosts:
+            - name: private_service
+              domains:
+              - "*"
+              routes:
+              - match:
+                  prefix: "/"
+                route:
+                  cluster: private_service
+                decorator:
+                  operation: callPrivate
+          http_filters:
+          - name: envoy.router
+            typed_config: {}
+  clusters:
+  - name: service
+    connect_timeout: 0.25s
+    type: STRICT_DNS
+    lb_policy: ROUND_ROBIN
+    load_assignment:
+      cluster_name: service
+      endpoints:
+      - lb_endpoints:
+        - endpoint:
+            address:
+              socket_address:
+                address: service1
+                port_value: 8080
+  - name: private_service
+    connect_timeout: 0.250s
+    type: strict_dns
+    lb_policy: round_robin
+    http2_protocol_options: {}
+    load_assignment:
+      cluster_name: private_service
+      endpoints:
+      - lb_endpoints:
+        - endpoint:
+            address:
+              socket_address:
+                address: service2-sidecar
+                port_value: 80
+  - name: jaeger
+    connect_timeout: 1s
+    type: strict_dns
+    lb_policy: round_robin
+    load_assignment:
+      cluster_name: jaeger
+      endpoints:
+      - lb_endpoints:
+        - endpoint:
+            address:
+              socket_address:
+                address: jaeger
+                port_value: 9411
+
+tracing:
+  http:
+    name: envoy.zipkin
+    typed_config:
+      "@type": type.googleapis.com/envoy.config.trace.v2.ZipkinConfig
+      collector_cluster: jaeger
+      collector_endpoint: "/api/v1/spans"
+      shared_span_context: false
