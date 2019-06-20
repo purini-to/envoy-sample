@@ -1,0 +1,7 @@
+FROM migrate/migrate
+
+COPY scripts/wait-mysql-connection.sh wait-mysql-connection.sh
+
+ENTRYPOINT ["sh"]
+
+CMD ["wait-mysql-connection.sh"]

@@ -34,6 +34,20 @@ static_resources:
                 allow_methods: "GET"
               routes:
               - match:
+                  prefix: "/tasks/"
+                route:
+                  prefix_rewrite: "/"
+                  cluster: service3
+                decorator:
+                  operation: callTasks
+              - match:
+                  prefix: "/tasks"
+                route:
+                  prefix_rewrite: "/"
+                  cluster: service3
+                decorator:
+                  operation: callTasks
+              - match:
                   prefix: "/"
                 route:
                   cluster: service1
@@ -55,13 +69,27 @@ static_resources:
     dns_lookup_family: V4_ONLY
     lb_policy: ROUND_ROBIN
     load_assignment:
-      cluster_name: service
+      cluster_name: service1
       endpoints:
       - lb_endpoints:
         - endpoint:
             address:
               socket_address:
                 address: service1-sidecar
+                port_value: 80
+  - name: service3
+    connect_timeout: 0.25s
+    type: LOGICAL_DNS
+    dns_lookup_family: V4_ONLY
+    lb_policy: ROUND_ROBIN
+    load_assignment:
+      cluster_name: service3
+      endpoints:
+      - lb_endpoints:
+        - endpoint:
+            address:
+              socket_address:
+                address: service3-sidecar
                 port_value: 80
   - name: jaeger
     connect_timeout: 1s

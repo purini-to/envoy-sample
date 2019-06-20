@@ -85,7 +85,7 @@ static_resources:
                 address: service1
                 port_value: 8080
   - name: private_service
-    connect_timeout: 0.250s
+    connect_timeout: 0.25s
     type: strict_dns
     lb_policy: round_robin
     http2_protocol_options: {}

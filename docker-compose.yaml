@@ -57,10 +57,67 @@ services:
     expose:
     - "80"
 
+  service3:
+    build:
+      context: ./services/task
+    networks:
+    - back
+    expose:
+    - "8080"
+    environment:
+      DATA_SOURCE_NAME: "root:mysql@tcp(service3-sidecar:3306)/app?charset=utf8mb4&parseTime=true&loc=Asia%2FTokyo"
+
+  service3-sidecar:
+    image: envoyproxy/envoy-alpine
+    command: "/usr/local/bin/envoy -c /etc/external-envoy.yaml --service-cluster task"
+    volumes:
+    - ./services/task/envoy-sidecar.yaml:/etc/external-envoy.yaml
+    networks:
+    - back
+    expose:
+    - "80"
+
+  mysql:
+    image: mysql:5
+    command: "--character-set-server=utf8mb4 --collation-server=utf8mb4_general_ci"
+    volumes:
+    - ./data/mysql:/var/lib/mysql
+    networks:
+    - back
+    environment:
+    - MYSQL_ROOT_PASSWORD=mysql
+    - MYSQL_DATABASE=app
+    - TZ=Asia/Tokyo
+    expose:
+    - "3306"
+    ports:
+    - "33060:3306"
+
+  mysql-sidecar:
+    image: envoyproxy/envoy-alpine
+    command: "/usr/local/bin/envoy -c /etc/external-envoy.yaml --service-cluster mysql"
+    volumes:
+    - ./envoy-mysql.yaml:/etc/external-envoy.yaml
+    networks:
+    - back
+    expose:
+    - "3306"
+
+  migrator:
+    build:
+      context: .
+      dockerfile: DockerfileMigrator
+    volumes:
+    - ./migrations:/migrations
+    networks:
+    - back
+    depends_on:
+    - mysql
+
   jaeger:
     image: jaegertracing/all-in-one
     environment:
-      - COLLECTOR_ZIPKIN_HTTP_PORT=9411
+    - COLLECTOR_ZIPKIN_HTTP_PORT=9411
     networks:
     - back
     expose:
