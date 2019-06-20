@@ -8,6 +8,10 @@ import (
 	"fmt"
 	"github.com/go-chi/chi"
 	"github.com/go-chi/chi/middleware"
+	"github.com/openzipkin/zipkin-go"
+	"github.com/openzipkin/zipkin-go/propagation/b3"
+	zipkinhttp "github.com/openzipkin/zipkin-go/reporter/http"
+	escontext "github.com/purini-to/envoy-sample/context"
 	"github.com/purini-to/envoy-sample/services/task"
 	"github.com/purini-to/zapmw"
 	"go.uber.org/zap"
@@ -27,6 +31,12 @@ var (
 	gstimeout time.Duration
 
 	dataSourceName = os.Getenv("DATA_SOURCE_NAME")
+)
+
+var (
+	serviceName        = "MyService"
+	serviceHostPort    = "service3-sidecar:3306"
+	zipkinHTTPEndpoint = os.Getenv("ZIPKIN_HTTP_ENDPOINT")
 )
 
 func main() {
@@ -57,23 +67,41 @@ func run() {
 	}
 
 	if err != nil {
-		panic(fmt.Sprintf("Logger initialize failed. err: %s", err.Error()))
+		panic(fmt.Sprintf("Unable to create logger. err: %s", err.Error()))
 	}
 
 	db, err := sql.Open("mysql", dataSourceName)
 	if err != nil {
-		logger.Panic("Database connection failed.", zap.Error(err))
+		logger.Panic("Unable to database connect.", zap.Error(err))
 	}
 	defer db.Close()
 
-	taskRepo := task.NewRepository(db)
+	reporter := zipkinhttp.NewReporter(zipkinHTTPEndpoint)
+	defer reporter.Close()
+
+	// create our local service endpoint
+	endpoint, err := zipkin.NewEndpoint("task", "localhost:0")
+	if err != nil {
+		logger.Panic("Unable to create local endpoint.", zap.Error(err))
+	}
+
+	// initialize our tracer
+	tracer, err := zipkin.NewTracer(reporter, zipkin.WithLocalEndpoint(endpoint))
+	if err != nil {
+		logger.Panic("Unable to create tracer.", zap.Error(err))
+	}
+
+	taskRepo, err := task.NewRepository(db, tracer)
+	if err != nil {
+		logger.Panic("Unable to task.Repository.", zap.Error(err))
+	}
 
 	r := chi.NewRouter()
 
-	r.Use(Middleware(logger)...)
+	r.Use(Middleware(logger, tracer)...)
 
 	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
-		res, err := taskRepo.FindAll()
+		res, err := taskRepo.FindAll(r.Context())
 		if err != nil {
 			panic(err)
 		}
@@ -84,7 +112,7 @@ func run() {
 
 	r.Get("/{id}", func(w http.ResponseWriter, r *http.Request) {
 		id := chi.URLParam(r, "id")
-		res, err := taskRepo.FindByID(id)
+		res, err := taskRepo.FindByID(r.Context(), id)
 		if err != nil {
 			panic(err)
 		}
@@ -127,12 +155,21 @@ func run() {
 	logger.Info("Exit")
 }
 
-func Middleware(logger *zap.Logger) []func(http.Handler) http.Handler {
+func Middleware(logger *zap.Logger, tracer *zipkin.Tracer) []func(http.Handler) http.Handler {
 	return []func(http.Handler) http.Handler{
 		middleware.RealIP,
 		zapmw.WithZap(logger, withReqId),
 		zapmw.Request(zapcore.InfoLevel, "request"),
 		zapmw.Recoverer(zapcore.ErrorLevel, "recover"),
+		func(next http.Handler) http.Handler {
+			fn := func(w http.ResponseWriter, r *http.Request) {
+				// try to extract B3 Headers from upstream
+				sc := tracer.Extract(b3.ExtractHTTP(r))
+				ctx := escontext.WithSpanContext(r.Context(), sc)
+				next.ServeHTTP(w, r.WithContext(ctx))
+			}
+			return http.HandlerFunc(fn)
+		},
 	}
 }
 

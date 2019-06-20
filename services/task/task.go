@@ -1,7 +1,11 @@
 package task
 
 import (
+	"context"
 	"database/sql"
+	"fmt"
+	"github.com/openzipkin/zipkin-go"
+	escontext "github.com/purini-to/envoy-sample/context"
 	"time"
 )
 
@@ -14,16 +18,17 @@ type Task struct {
 }
 
 type Repository interface {
-	FindAll() ([]*Task, error)
-	FindByID(id string) (*Task, error)
+	FindAll(ctx context.Context) ([]*Task, error)
+	FindByID(ctx context.Context, id string) (*Task, error)
 }
 
 type repository struct {
-	db *sql.DB
+	db     *sql.DB
+	tracer *zipkin.Tracer
 }
 
-func (r *repository) FindAll() ([]*Task, error) {
-	rows, err := r.db.Query(`SELECT * FROM task ORDER BY id`)
+func (r *repository) FindAll(ctx context.Context) ([]*Task, error) {
+	rows, err := r.Query(ctx, `SELECT * FROM task ORDER BY id`)
 	if err != nil {
 		return []*Task{}, err
 	}
@@ -37,8 +42,8 @@ func (r *repository) FindAll() ([]*Task, error) {
 	return tasks, nil
 }
 
-func (r *repository) FindByID(id string) (*Task, error) {
-	rows, err := r.db.Query(`SELECT * FROM task WHERE id = ?`, id)
+func (r *repository) FindByID(ctx context.Context, id string) (*Task, error) {
+	rows, err := r.Query(ctx, `SELECT * FROM task WHERE id = ?`, id)
 	if err != nil {
 		return nil, err
 	}
@@ -56,10 +61,19 @@ func (r *repository) FindByID(id string) (*Task, error) {
 	return tasks[0], nil
 }
 
-func NewRepository(db *sql.DB) Repository {
+func (r *repository) Query(ctx context.Context, query string, args ...interface{}) (*sql.Rows, error) {
+	span := r.tracer.StartSpan("query", zipkin.Parent(escontext.GetSpanContext(ctx)))
+	span.Tag("query", query)
+	span.Tag("args", fmt.Sprintf("%v", args))
+	defer span.Finish()
+	return r.db.Query(query, args...)
+}
+
+func NewRepository(db *sql.DB, tracer *zipkin.Tracer) (Repository, error) {
 	return &repository{
-		db: db,
-	}
+		db:     db,
+		tracer: tracer,
+	}, nil
 }
 
 func scanBindTask(rows *sql.Rows) ([]*Task, error) {
